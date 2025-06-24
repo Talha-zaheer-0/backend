@@ -11,6 +11,7 @@ const app = express();
 
 // Middleware
 app.use(cors());
+
 app.use(express.json()); // Parse incoming JSON
 
 // Serve uploaded images statically
