@@ -1,7 +1,4 @@
-// server.js
-
-require('dotenv').config(); // Load environment variables
-
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -11,15 +8,17 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json()); // Parse incoming JSON
+app.use(express.json());
+app.use(cors({ origin: 'http://localhost:5173' })); // Adjust to your frontend URL
 
 // Serve uploaded images statically
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'Uploads')));
 
 // Routes
-app.use('/api/auth', require('./routes/auth'));          // Your auth routes (already there)
-app.use('/api/products', require('./routes/productRoutes')); // ✅ Add product routes
- 
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/email', require('./routes/emailRoutes')); // Add email routes
+app.use('/api/products', require('./routes/productRoutes'));
+
 // MongoDB connection
 const mongoURI = process.env.MONGO_URI || 'mongodb://localhost:27017/myapp';
 
