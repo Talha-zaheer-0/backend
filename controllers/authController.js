@@ -66,7 +66,10 @@ exports.login = async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ msg: "Invalid credentials" });
-
+        if(user.isBlocked == true){
+      res.json({message:'your account is blocked'})
+    }
+    
     const token = jwt.sign({ id: user._id, isAdmin: user.isAdmin }, process.env.JWT_SECRET, { expiresIn: '2h' });
     res.json({ token, user: { id: user._id, name: user.name, email: user.email, isAdmin: user.isAdmin } });
   } catch (err) {
@@ -81,5 +84,28 @@ exports.getUserDetails = async (req, res) => {
     res.json({ user: { id: user._id, name: user.name, email: user.email, isAdmin: user.isAdmin } });
   } catch (err) {
     res.status(500).json({ msg: "Server error", error: err.message });
+  }
+};
+
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find({isAdmin:false});
+    res.status(200).json({ users });
+  } catch (err) {
+    res.status(500).json({ msg: "Server error", error: err.message });
+  }
+};
+
+exports.toggleBlocksFunction = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    user.isBlocked = !user.isBlocked;
+    await user.save();
+
+    res.json({ message: `User ${user.isBlocked ? 'blocked' : 'unblocked'}`, userId: user._id, isBlocked: user.isBlocked });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
   }
 };
