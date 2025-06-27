@@ -1,0 +1,13 @@
+{
+  "_id": {
+    "$oid": "6852b9715452871d36417ac8"
+  },
+  "email": "saleemi@gmail.com",
+  "isAdmin": true,
+  "isVerified": true,
+  "name": "Talha saleemi",
+  "password": "$2b$10$wM9.rrgZTPccZppLnJFt8uJBvgiU9nDLFaxG1MTeRMzDz8JySoE62",
+  "updatedAt": {
+    "$date": "2025-06-18T13:04:49.810Z"
+  }
+}
