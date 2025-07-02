@@ -8,6 +8,10 @@ router.post('/login', login);
 router.post('/verify', verifyEmail);
 router.get('/getAllUsers',getAllUsers);
 router.post('/toggleBlock/:id',toggleBlocksFunction)
+router.get('/users', authMiddleware, getAllUsers);
+router.patch('/users/:id/toggle-block', authMiddleware, toggleBlocksFunction);
 router.get('/me', authMiddleware, getUserDetails);
 
 module.exports = router;
+
+ 

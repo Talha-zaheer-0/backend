@@ -9,14 +9,14 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(cors({ origin: 'http://localhost:5173' })); // Adjust to your frontend URL
+app.use(cors({ origin: 'http://localhost:5173' }));
 
 // Serve uploaded images statically
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads')));
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
-app.use('/api/email', require('./routes/emailRoutes')); // Add email routes
+app.use('/api/email', require('./routes/emailRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
 
 // MongoDB connection
@@ -28,7 +28,6 @@ mongoose.connect(mongoURI, {
 })
 .then(() => {
   console.log('✅ MongoDB connected successfully');
-
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
