@@ -15,9 +15,13 @@ app.use(cors({ origin: 'http://localhost:5173' })); // Adjust to your frontend U
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads')));
 
 // Routes
+// Routes
 app.use('/api/auth', require('./routes/auth'));
-app.use('/api/email', require('./routes/emailRoutes')); // Add email routes
+app.use('/api/email', require('./routes/emailRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
+app.use('/api/comments', require('./routes/reviewRoutes'));
+app.use('/api/reviews', require('./routes/reviewRoutes')); // ✅ Add this line
+
 
 // MongoDB connection
 const mongoURI = process.env.MONGO_URI || 'mongodb://localhost:27017/myapp';
