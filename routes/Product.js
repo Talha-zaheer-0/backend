@@ -8,4 +8,3 @@ router.get('/:id', productController.getProductById);
 router.get('/reviews/:productId', productController.getReviews);
 
 module.exports = router;
-  

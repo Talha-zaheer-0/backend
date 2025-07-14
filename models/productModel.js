@@ -11,7 +11,8 @@ const productSchema = new mongoose.Schema({
   bestseller: { type: Boolean, default: false },
   images: [{ type: String }],
   salesCount: { type: Number, default: 0 },
-  reviewCount: { type: Number, default: 0 }
+  reviewCount: { type: Number, default: 0 },
+  averageRating: { type: Number, default: 0, min: 0, max: 5 }, // Added field
 }, { timestamps: true });
 
 module.exports = mongoose.model('Product', productSchema);

@@ -4,10 +4,36 @@ const multer = require('multer');
 const { v2: cloudinary } = require('cloudinary');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const Product = require('../models/productModel');
-const { addToCart, getCart, removeFromCart, clearCart, createProduct, createOrder, submitReview, likeReview, getReviews, updateProduct, getOrders, updateOrderStatus, deleteOrder } = require('../controllers/productController');
+const Order = require('../models/Order');
+const {
+  addToCart,
+  getCart,
+  createOrder,
+  addProductComment,
+  addReplyToComment,
+  getProductComments,
+  likeComment,
+  getOrders,
+  updateOrderStatus,
+  deleteOrder,
+  addProduct,
+  updateProduct,
+  getHotProduct,
+  getFeaturedProduct,
+  getSaleProducts,
+  addOrUpdateRating,
+  getProductRating,
+  removeFromCart
+} = require('../controllers/productController');
 const authMiddleware = require('../middleware/authMiddleware');
 const User = require('../models/User');
 const Admin = require('../models/Admin');
+
+// Error handling middleware to ensure JSON responses
+router.use((err, req, res, next) => {
+  console.error('❌ Route Error:', err.message, err.stack);
+  res.status(err.status || 500).json({ message: 'Server error', error: err.message });
+});
 
 // Setup Cloudinary
 try {
@@ -18,7 +44,7 @@ try {
   });
   console.log('✅ Cloudinary configured successfully');
 } catch (err) {
-  console.error('❌ Cloudinary config error:', err.message);
+  console.error('❌ Cloudinary config error:', err.message, err.stack);
 }
 
 // Setup multer with cloudinary storage
@@ -30,7 +56,19 @@ const storage = new CloudinaryStorage({
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const filetypes = /jpeg|jpg|png/;
+    const mimetype = filetypes.test(file.mimetype);
+    const extname = filetypes.test(file.originalname.toLowerCase());
+    if (mimetype && extname) {
+      return cb(null, true);
+    }
+    cb(new Error('Error: File upload only supports JPG, JPEG, PNG formats'));
+  }
+});
 
 // Middleware to check if user is admin
 const isAdmin = async (req, res, next) => {
@@ -44,7 +82,7 @@ const isAdmin = async (req, res, next) => {
     }
     next();
   } catch (err) {
-    console.error('❌ Admin check error:', err.message);
+    console.error('❌ Admin check error:', err.message, err.stack);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
@@ -55,43 +93,8 @@ router.get('/cart', authMiddleware, getCart);
 // Route: POST /api/products/cart/add
 router.post('/cart/add', authMiddleware, addToCart);
 
-// Route: POST /api/products/cart/remove
-router.post('/cart/remove', authMiddleware, removeFromCart);
-
-// Route: POST /api/products/cart/clear
-router.post('/cart/clear', authMiddleware, clearCart);
-
-// Route: GET /api/products
-router.get('/', async (req, res) => {
-  try {
-    const products = await Product.find({});
-    res.status(200).json(products);
-  } catch (error) {
-    console.error('❌ Fetch Products Error:', error.message);
-    res.status(500).json({ message: 'Internal Server Error', error: error.message });
-  }
-});
-
-// Route: POST /api/products/add
-router.post('/add', authMiddleware, isAdmin, upload.array('images', 4), createProduct);
-
-// Route: PUT /api/products/:id
-router.put('/:id', authMiddleware, isAdmin, upload.array('images', 4), updateProduct);
-
-// Route: DELETE /api/products/:id
-router.delete('/:id', authMiddleware, isAdmin, async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id);
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
-    await Product.findByIdAndDelete(req.params.id);
-    res.status(200).json({ message: 'Product deleted successfully' });
-  } catch (error) {
-    console.error('❌ Delete Product Error:', error.message);
-    res.status(500).json({ message: 'Internal Server Error', error: error.message });
-  }
-});
+// Route: DELETE /api/products/cart/:productId
+router.delete('/cart/:productId', authMiddleware, removeFromCart);
 
 // Route: POST /api/products/order
 router.post('/order', authMiddleware, createOrder);
@@ -105,8 +108,28 @@ router.patch('/orders/:orderId', authMiddleware, isAdmin, updateOrderStatus);
 // Route: DELETE /api/products/orders/:orderId
 router.delete('/orders/:orderId', authMiddleware, isAdmin, deleteOrder);
 
+// Route: GET /api/products
+router.get('/', async (req, res, next) => {
+  try {
+    const products = await Product.find({});
+    res.status(200).json(products);
+  } catch (error) {
+    console.error('❌ Fetch Products Error:', error.message, error.stack);
+    next(error);
+  }
+});
+
+// Route: GET /api/products/hot
+router.get('/hot', getHotProduct);
+
+// Route: GET /api/products/featured
+router.get('/featured', getFeaturedProduct);
+
+// Route: GET /api/products/sale
+router.get('/sale', getSaleProducts);
+
 // Route: GET /api/products/:id
-router.get('/:id', async (req, res) => {
+router.get('/:id', async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) {
@@ -114,18 +137,39 @@ router.get('/:id', async (req, res) => {
     }
     res.status(200).json(product);
   } catch (error) {
-    console.error('❌ Fetch Product Error:', error.message);
-    res.status(500).json({ message: 'Internal Server Error', error: error.message });
+    console.error('❌ Fetch Product Error:', error.message, error.stack);
+    next(error);
   }
 });
 
-// Route: POST /api/products/review
-router.post('/review', authMiddleware, submitReview);
+// Route: POST /api/products/add
+router.post('/add', authMiddleware, isAdmin, upload.array('images', 4), addProduct);
 
-// Route: POST /api/products/reviews/:reviewId/like
-router.post('/reviews/:reviewId/like', authMiddleware, likeReview);
+// Route: PUT /api/products/:id
+router.put('/:id', authMiddleware, isAdmin, upload.array('images', 4), updateProduct);
 
-// Route: GET /api/products/reviews/:productId
-router.get('/reviews/:productId', getReviews);
+// Route: POST /api/products/product-comment
+router.post('/product-comment', authMiddleware, upload.single('image'), addProductComment);
+
+// Route: POST /api/products/review/reply
+router.post('/review/reply', authMiddleware, upload.single('image'), addReplyToComment);
+
+// Route: GET /api/products/comments/:productId
+router.get('/comments/:productId', getProductComments);
+
+// Route: POST /api/products/comment/:commentId/like
+router.post('/comment/:commentId/like', authMiddleware, likeComment);
+
+// Route: POST /api/products/rating
+router.post('/rating', authMiddleware, addOrUpdateRating);
+
+// Route: GET /api/products/rating/:productId
+router.get('/rating/:productId', getProductRating);
+
+// Add to the top with other imports
+const { getUserOrders } = require('../controllers/productController');
+
+// Add the new route below the existing routes
+router.get('/orders/user', authMiddleware, getUserOrders);
 
 module.exports = router;

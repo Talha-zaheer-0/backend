@@ -7,9 +7,8 @@ const path = require('path');
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({ origin: 'http://localhost:5173' })); // Updated to single CORS call
 app.use(express.json());
-app.use(cors({ origin: 'http://localhost:5173' }));
 
 // Serve uploaded images statically
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads')));

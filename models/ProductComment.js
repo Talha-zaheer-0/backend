@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const reviewSchema = new mongoose.Schema({
+const productCommentSchema = new mongoose.Schema({
   productId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product',
@@ -15,31 +15,22 @@ const reviewSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  rating: {
-    type: Number,
-    min: 1, // Minimum rating of 1 for reviews
-    max: 5,
-    required: true
-  },
-  comment: {
+  text: {
     type: String,
-    default: ''
+    required: true
   },
   image: {
     type: String
   },
-  comments: [{
+  likes: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  replies: [{
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     username: { type: String, required: true },
     text: { type: String, required: true },
-    image: { type: String },
-    likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-    replies: [{
-      userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      username: { type: String, required: true },
-      text: { type: String, required: true },
-      image: { type: String }
-    }]
+    image: { type: String }
   }],
   createdAt: {
     type: Date,
@@ -47,4 +38,4 @@ const reviewSchema = new mongoose.Schema({
   }
 });
 
-module.exports = mongoose.model('Review', reviewSchema);
+module.exports = mongoose.model('ProductComment', productCommentSchema);
