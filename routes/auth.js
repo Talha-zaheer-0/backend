@@ -1,7 +1,12 @@
+// In auth.js
 const express = require('express');
 const router = express.Router();
-const { signup, login, verifyEmail, getAllUsers, getUserDetails, toggleBlocksFunction, addChildAdmin, verifyChildAdmin, getChildAdmins, removeChildAdmin, sendOrderConfirmationEmail, forgotPassword, resetPassword } = require('../controllers/authController');
+const { signup, login, verifyEmail, getAllUsers, getUserDetails, getMe, toggleBlocksFunction, addChildAdmin, verifyChildAdmin, getChildAdmins, removeChildAdmin, sendOrderConfirmationEmail, forgotPassword, resetPassword } = require('../controllers/authController');
 const authMiddleware = require('../middleware/authMiddleware');
+
+// Change this line:
+router.get('/api/auth/me', authMiddleware, getMe); // Use GET and add authMiddleware
+// Remove: router.post('/getMe', getMe);
 
 router.post('/signup', signup);
 router.post('/login', login);

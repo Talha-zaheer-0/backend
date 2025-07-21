@@ -58,6 +58,11 @@ exports.addProduct = async (req, res) => {
     });
 
     const savedProduct = await newProduct.save();
+    try {
+      req.io.to('admin').emit('productAdded', savedProduct);
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (productAdded):', emitError.message);
+    }
     res.status(201).json({ message: 'Product added successfully', product: savedProduct });
   } catch (error) {
     console.error('❌ Add Product Error:', error.message, error.stack);
@@ -99,18 +104,16 @@ exports.updateProduct = async (req, res) => {
       return res.status(404).json({ message: 'Product not found' });
     }
 
-    // Initialize imageUrls with existingImages from request, default to empty array
     let imageUrls = Array.isArray(existingImages)
       ? existingImages
       : typeof existingImages === 'string'
       ? [existingImages]
       : [];
 
-    // Delete removed images from Cloudinary
     const imagesToDelete = product.images.filter(url => !imageUrls.includes(url));
     if (imagesToDelete.length > 0) {
       const deletePromises = imagesToDelete.map(url => {
-        const publicId = url.split('/').pop().split('.')[0]; // Extract public_id from URL
+        const publicId = url.split('/').pop().split('.')[0];
         return cloudinary.uploader.destroy(`products/${publicId}`).catch(err => {
           console.error(`❌ Failed to delete image ${publicId} from Cloudinary:`, err.message);
         });
@@ -119,7 +122,6 @@ exports.updateProduct = async (req, res) => {
       console.log('Deleted images from Cloudinary:', imagesToDelete);
     }
 
-    // Upload new images if provided
     if (req.files && req.files.length > 0) {
       const imageUploadPromises = req.files.map(file =>
         cloudinary.uploader.upload(file.path, { folder: 'products' })
@@ -155,10 +157,53 @@ exports.updateProduct = async (req, res) => {
       return res.status(404).json({ message: 'Product update failed' });
     }
 
+    try {
+      req.io.to('admin').emit('productUpdated', updatedProduct);
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (productUpdated):', emitError.message);
+    }
     console.log('Updated product images:', updatedProduct.images);
     res.status(200).json({ message: 'Product updated successfully', product: updatedProduct });
   } catch (error) {
     console.error('❌ Update Product Error:', error.message, error.stack);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+exports.deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: 'Invalid product ID format' });
+    }
+
+    const product = await Product.findById(id);
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    const deleteImagePromises = product.images.map(url => {
+      const publicId = url.split('/').pop().split('.')[0];
+      return cloudinary.uploader.destroy(`products/${publicId}`).catch(err => {
+        console.error(`❌ Failed to delete image ${publicId} from Cloudinary:`, err.message);
+      });
+    });
+    await Promise.all(deleteImagePromises);
+
+    await ProductComment.deleteMany({ productId: id });
+    await Review.deleteMany({ productId: id });
+
+    await Product.findByIdAndDelete(id);
+
+    try {
+      req.io.to('admin').emit('productDeleted', { id });
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (productDeleted):', emitError.message);
+    }
+    res.status(200).json({ message: 'Product deleted successfully' });
+  } catch (error) {
+    console.error('❌ Delete Product Error:', error.message, error.stack);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
@@ -242,6 +287,13 @@ exports.addToCart = async (req, res) => {
     await cart.save();
 
     const populatedCart = await Cart.findById(cart._id).populate('items.productId');
+
+    try {
+      req.io.to(userId.toString()).emit('cartUpdate', populatedCart);
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (cartUpdate):', emitError.message);
+    }
+
     res.status(200).json({ message: 'Cart updated successfully', cart: populatedCart });
   } catch (error) {
     console.error('❌ Add to Cart Error:', error.message, error.stack);
@@ -268,6 +320,13 @@ exports.removeFromCart = async (req, res) => {
     await cart.save();
 
     const populatedCart = await Cart.findById(cart._id).populate('items.productId');
+
+    try {
+      req.io.to(userId.toString()).emit('cartUpdate', populatedCart);
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (cartUpdate):', emitError.message);
+    }
+
     res.status(200).json({ message: 'Product removed from cart', cart: populatedCart });
   } catch (error) {
     console.error('❌ Remove from Cart Error:', error.message, error.stack);
@@ -325,6 +384,14 @@ exports.createOrder = async (req, res) => {
     await order.save();
     await Cart.findOneAndUpdate({ userId }, { items: [], updatedAt: Date.now() });
 
+    try {
+      req.io.to(userId.toString()).emit('orderUpdate', order);
+      req.io.to(userId.toString()).emit('cartUpdate', { items: [] });
+      req.io.to('admin').emit('adminOrderUpdate', order);
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (orderUpdate/adminOrderUpdate):', emitError.message);
+    }
+
     res.status(201).json({ message: 'Order created successfully', order });
   } catch (error) {
     console.error('❌ Create Order Error:', error.message, error.stack);
@@ -334,7 +401,7 @@ exports.createOrder = async (req, res) => {
 
 exports.getOrders = async (req, res) => {
   try {
-    const orders = await Order.find({})
+    const orders = await Order.find({ status: { $ne: 'Delivered' } })
       .populate('items.productId')
       .sort({ createdAt: -1 });
     res.status(200).json({ orders });
@@ -346,16 +413,119 @@ exports.getOrders = async (req, res) => {
 
 exports.updateOrderStatus = async (req, res) => {
   try {
-    const { status } = req.body;
-    const order = await Order.findOneAndUpdate(
-      { orderId: req.params.orderId },
-      { status },
-      { new: true }
-    );
+    const { status, trackingId } = req.body;
+    const order = await Order.findOne({ orderId: req.params.orderId }).populate('userId');
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
-    res.status(200).json({ message: 'Order status updated', order });
+
+    const updateData = { status };
+    if (status === 'Shipped' && trackingId) {
+      updateData.trackingId = trackingId;
+    }
+    if (status === 'Delivered') {
+      updateData.deliveredAt = new Date();
+    }
+
+    const updatedOrder = await Order.findOneAndUpdate(
+      { orderId: req.params.orderId },
+      updateData,
+      { new: true }
+    ).populate('userId');
+
+    try {
+      req.io.to(updatedOrder.userId._id.toString()).emit('orderUpdate', updatedOrder);
+      req.io.to('admin').emit('adminOrderUpdate', updatedOrder);
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (orderUpdate/adminOrderUpdate):', emitError.message);
+    }
+
+    if (status === 'Shipped' && trackingId) {
+      const itemsHtml = order.items.map(item => `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.productId?.name || 'Unknown Product'}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.quantity}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">$${item.price.toFixed(2)}</td>
+        </tr>
+      `).join('');
+
+      const shipMailOptions = {
+        from: process.env.EMAIL_USER,
+        to: updatedOrder.userId.email,
+        subject: 'Your Forever Buy Order Has Shipped!',
+        text: `Dear ${updatedOrder.userName},\n\nYour order has been shipped with tracking ID: ${trackingId}.\n\nOrder Details:\n${order.items.map(item => `- ${item.productId?.name || 'Unknown Product'}: ${item.quantity} x $${item.price.toFixed(2)}`).join('\n')}\n\nTotal: $${updatedOrder.totalAmount.toFixed(2)}\nDelivery Address: ${updatedOrder.deliveryAddress}\nPhone: ${updatedOrder.phone}\n\nTrack your order using the provided tracking ID.\n\nBest regards,\nForever Buy Team`,
+        html: `
+          <h2>Your Order Has Shipped!</h2>
+          <p>Dear ${updatedOrder.userName},</p>
+          <p>Your order has been shipped with <b>Tracking ID: ${trackingId}</b>.</p>
+          <h3>Order Details</h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Product</th>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Quantity</th>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
+          </table>
+          <p><b>Total:</b> $${updatedOrder.totalAmount.toFixed(2)}</p>
+          <p><b>Delivery Address:</b> ${updatedOrder.deliveryAddress}</p>
+          <p><b>Phone:</b> ${updatedOrder.phone}</p>
+          <p>Track your order using the provided tracking ID.</p>
+          <p>Best regards,<br>Forever Buy Team</p>
+        `,
+      };
+
+      await transporter.sendMail(shipMailOptions);
+    }
+
+    if (status === 'Delivered') {
+      const itemsHtml = order.items.map(item => `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.productId?.name || 'Unknown Product'}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${item.quantity}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">$${item.price.toFixed(2)}</td>
+        </tr>
+      `).join('');
+
+      const deliverMailOptions = {
+        from: process.env.EMAIL_USER,
+        to: updatedOrder.userId.email,
+        subject: 'Your Forever Buy Order Has Been Delivered!',
+        text: `Dear ${updatedOrder.userName},\n\nThank you for shopping with Forever Buy! Your order has been delivered.\n\nTracking ID: ${updatedOrder.trackingId || 'N/A'}\n\nOrder Details:\n${order.items.map(item => `- ${item.productId?.name || 'Unknown Product'}: ${item.quantity} x $${item.price.toFixed(2)}`).join('\n')}\n\nTotal: $${updatedOrder.totalAmount.toFixed(2)}\nDelivery Address: ${updatedOrder.deliveryAddress}\nPhone: ${updatedOrder.phone}\n\nWe hope you enjoy your purchase!\n\nBest regards,\nForever Buy Team`,
+        html: `
+          <h2>Your Order Has Been Delivered!</h2>
+          <p>Dear ${updatedOrder.userName},</p>
+          <p>Thank you for shopping with <b>Forever Buy</b>! Your order has been delivered.</p>
+          <p><b>Tracking ID:</b> ${updatedOrder.trackingId || 'N/A'}</p>
+          <h3>Order Details</h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Product</th>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Quantity</th>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
+          </table>
+          <p><b>Total:</b> $${updatedOrder.totalAmount.toFixed(2)}</p>
+          <p><b>Delivery Address:</b> ${updatedOrder.deliveryAddress}</p>
+          <p><b>Phone:</b> ${updatedOrder.phone}</p>
+          <p>We hope you enjoy your purchase!</p>
+          <p>Best regards,<br>Forever Buy Team</p>
+        `,
+      };
+
+      await transporter.sendMail(deliverMailOptions);
+    }
+
+    res.status(200).json({ message: 'Order status updated', order: updatedOrder });
   } catch (error) {
     console.error('❌ Update Order Status Error:', error.message, error.stack);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -368,9 +538,38 @@ exports.deleteOrder = async (req, res) => {
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
+    try {
+      req.io.to(order.userId.toString()).emit('orderUpdate', null);
+      req.io.to('admin').emit('adminOrderUpdate', { orderId: req.params.orderId, deleted: true });
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (orderUpdate/adminOrderUpdate):', emitError.message);
+    }
     res.status(200).json({ message: 'Order deleted successfully' });
   } catch (error) {
     console.error('❌ Delete Order Error:', error.message, error.stack);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+exports.completeOrder = async (req, res) => {
+  try {
+    const order = await Order.findOne({ orderId: req.params.orderId });
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+    if (order.status !== 'Delivered') {
+      return res.status(400).json({ message: 'Order must be in Delivered status to complete' });
+    }
+    await Order.findOneAndDelete({ orderId: req.params.orderId });
+    try {
+      req.io.to(order.userId.toString()).emit('orderUpdate', null);
+      req.io.to('admin').emit('adminOrderUpdate', { orderId: req.params.orderId, deleted: true });
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (orderUpdate/adminOrderUpdate):', emitError.message);
+    }
+    res.status(200).json({ message: 'Order completed and deleted successfully' });
+  } catch (error) {
+    console.error('❌ Complete Order Error:', error.message, error.stack);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
@@ -404,13 +603,20 @@ exports.addProductComment = async (req, res) => {
 
     const newComment = new ProductComment({
       productId,
-      userId,
+      userId: userId.toString(), // Store as string
       username: user.name,
       text,
-      image: imageUrl
+      image: imageUrl,
+      likes: [], // Initialize empty likes array
     });
     await newComment.save();
     await Product.findByIdAndUpdate(productId, { $inc: { reviewCount: 1 } });
+
+    try {
+      req.io.to('admin').emit('productCommentAdded', newComment);
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (productCommentAdded):', emitError.message);
+    }
 
     res.status(201).json(newComment);
   } catch (error) {
@@ -447,7 +653,7 @@ exports.addReplyToComment = async (req, res) => {
     }
 
     const newReply = {
-      userId,
+      userId: userId.toString(), // Store as string
       username: user.name,
       text: reply,
       image: imageUrl
@@ -455,6 +661,12 @@ exports.addReplyToComment = async (req, res) => {
     comment.replies = comment.replies || [];
     comment.replies.push(newReply);
     await comment.save();
+
+    try {
+      req.io.to('admin').emit('commentReplyAdded', { commentId, reply: newReply });
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (commentReplyAdded):', emitError.message);
+    }
 
     res.status(201).json(newReply);
   } catch (error) {
@@ -467,7 +679,14 @@ exports.getProductComments = async (req, res) => {
   try {
     const { productId } = req.params;
     const comments = await ProductComment.find({ productId }).sort({ createdAt: -1 });
-    res.status(200).json(comments);
+    // Sanitize likes array to ensure strings and remove null values
+    const sanitizedComments = comments.map(comment => ({
+      ...comment._doc,
+      userId: comment.userId.toString(), // Convert userId to string
+      likes: Array.isArray(comment.likes) ? comment.likes.filter(id => id != null).map(id => id.toString()) : [],
+    }));
+    console.log(`getProductComments: Fetched comments for product ${productId}:`, sanitizedComments);
+    res.status(200).json(sanitizedComments);
   } catch (error) {
     console.error('❌ Get Product Comments Error:', error.message, error.stack);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -505,7 +724,7 @@ exports.addOrUpdateRating = async (req, res) => {
     } else {
       const newReview = new Review({
         productId,
-        userId,
+        userId: userId.toString(), // Store as string
         username: user.name,
         rating,
       });
@@ -523,6 +742,12 @@ exports.addOrUpdateRating = async (req, res) => {
       : 0;
 
     await Product.findByIdAndUpdate(productId, { averageRating });
+
+    try {
+      req.io.to('admin').emit('productRatingUpdated', { productId, averageRating, reviewCount: reviews.length });
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (productRatingUpdated):', emitError.message);
+    }
 
     res.status(200).json({ message: isNewRating ? 'Rating added successfully' : 'Rating updated successfully', rating });
   } catch (error) {
@@ -571,30 +796,42 @@ exports.getProductById = async (req, res) => {
 exports.likeComment = async (req, res) => {
   try {
     const { commentId } = req.params;
-    const userId = req.user._id;
+    const userId = req.user.toString(); // Convert ObjectId to string
 
-    console.log(`Toggling like for comment ${commentId} by user ${userId}`);
+    console.log(`likeComment: Toggling like for comment ${commentId} by user ${userId}`);
 
     const comment = await ProductComment.findById(commentId);
     if (!comment) {
-      console.log('Comment not found');
+      console.log('likeComment: Comment not found');
       return res.status(404).json({ message: 'Comment not found' });
     }
 
+    // Initialize and sanitize likes array
+    comment.likes = Array.isArray(comment.likes) ? comment.likes.filter(id => id != null).map(id => id.toString()) : [];
+
+    // Toggle like
     const index = comment.likes.indexOf(userId);
     if (index === -1) {
       comment.likes.push(userId);
-      console.log(`Added like for user ${userId}`);
+      console.log(`likeComment: Added like for user ${userId}`);
     } else {
       comment.likes.splice(index, 1);
-      console.log(`Removed like for user ${userId}`);
+      console.log(`likeComment: Removed like for user ${userId}`);
     }
 
+    // Deduplicate likes array
+    comment.likes = [...new Set(comment.likes)];
+
     await comment.save();
-    console.log(`Updated likes: ${comment.likes}`);
+    try {
+      req.io.to('admin').emit('commentLikeToggled', { commentId, likes: comment.likes });
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (commentLikeToggled):', emitError.message);
+    }
+    console.log(`likeComment: Updated likes:`, comment.likes);
     res.status(200).json({ likes: comment.likes });
   } catch (error) {
-    console.error('Error in likeComment:', error.message);
+    console.error('❌ likeComment Error:', error.message, error.stack);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
@@ -611,3 +848,29 @@ exports.getUserOrders = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
+
+exports.deleteUserOrder = async (req, res) => {
+  try {
+    const userId = req.user;
+    const order = await Order.findOne({ orderId: req.params.orderId, userId });
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found or you are not authorized to delete this order' });
+    }
+    if (order.status !== 'Delivered') {
+      return res.status(400).json({ message: 'Only Delivered orders can be deleted' });
+    }
+    await Order.findOneAndDelete({ orderId: req.params.orderId, userId });
+    try {
+      req.io.to(userId.toString()).emit('orderUpdate', null);
+      req.io.to('admin').emit('adminOrderUpdate', { orderId: req.params.orderId, deleted: true });
+    } catch (emitError) {
+      console.error('❌ Socket.IO Emission Error (orderUpdate/adminOrderUpdate):', emitError.message);
+    }
+    res.status(200).json({ message: 'Order deleted successfully' });
+  } catch (error) {
+    console.error('❌ Delete User Order Error:', error.message, error.stack);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+const transporter = require('../nodemailerConfig');

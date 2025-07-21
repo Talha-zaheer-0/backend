@@ -16,6 +16,7 @@ const {
   getOrders,
   updateOrderStatus,
   deleteOrder,
+  completeOrder,
   addProduct,
   updateProduct,
   getHotProduct,
@@ -23,7 +24,10 @@ const {
   getSaleProducts,
   addOrUpdateRating,
   getProductRating,
-  removeFromCart
+  removeFromCart,
+  getUserOrders,
+  deleteUserOrder,
+  deleteProduct // Added
 } = require('../controllers/productController');
 const authMiddleware = require('../middleware/authMiddleware');
 const User = require('../models/User');
@@ -108,6 +112,9 @@ router.patch('/orders/:orderId', authMiddleware, isAdmin, updateOrderStatus);
 // Route: DELETE /api/products/orders/:orderId
 router.delete('/orders/:orderId', authMiddleware, isAdmin, deleteOrder);
 
+// Route: POST /api/products/orders/:orderId/complete
+router.post('/orders/:orderId/complete', authMiddleware, isAdmin, completeOrder);
+
 // Route: GET /api/products
 router.get('/', async (req, res, next) => {
   try {
@@ -148,6 +155,9 @@ router.post('/add', authMiddleware, isAdmin, upload.array('images', 4), addProdu
 // Route: PUT /api/products/:id
 router.put('/:id', authMiddleware, isAdmin, upload.array('images', 4), updateProduct);
 
+// Route: DELETE /api/products/:id
+router.delete('/:id', authMiddleware, isAdmin, deleteProduct); // Added
+
 // Route: POST /api/products/product-comment
 router.post('/product-comment', authMiddleware, upload.single('image'), addProductComment);
 
@@ -160,16 +170,21 @@ router.get('/comments/:productId', getProductComments);
 // Route: POST /api/products/comment/:commentId/like
 router.post('/comment/:commentId/like', authMiddleware, likeComment);
 
+// Route
+
 // Route: POST /api/products/rating
 router.post('/rating', authMiddleware, addOrUpdateRating);
 
 // Route: GET /api/products/rating/:productId
 router.get('/rating/:productId', getProductRating);
 
-// Add to the top with other imports
-const { getUserOrders } = require('../controllers/productController');
-
-// Add the new route below the existing routes
+// Route: GET /api/products/orders/user
 router.get('/orders/user', authMiddleware, getUserOrders);
+
+// Route: DELETE /api/products/orders/user/:orderId
+router.delete('/orders/user/:orderId', authMiddleware, deleteUserOrder);
+
+// Route: PATCH /api/products/orders/:orderId
+router.patch('/orders/:orderId', authMiddleware, isAdmin, updateOrderStatus);
 
 module.exports = router;
